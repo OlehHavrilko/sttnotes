@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const store = () => path.join(app.getPath('userData'), 'notes.json');
 const attachmentDir = () => path.join(app.getPath('userData'), 'attachments');
 function readNotes() { try { const value = JSON.parse(fs.readFileSync(store(), 'utf8')); return Array.isArray(value) ? value : []; } catch { return []; } }
@@ -21,6 +22,41 @@ function scanModelDir(dir) {
   const executable = files.find(f => /(^|[\\/])(whisper|whisper-cli|main)(\.exe)?$/i.test(f) || /whisper.*\.exe$/i.test(f)) || '';
   const models = files.filter(f => /\.(bin|gguf|pt|onnx|safetensors)$/i.test(f));
   return { directory: dir, executable: executable ? path.join(dir, executable) : '', models };
+}
+const modelCatalog = [
+  { id: 'base-en', name: 'Whisper base (English)', file: 'ggml-base.en.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' },
+  { id: 'tiny-en', name: 'Whisper tiny (English)', file: 'ggml-tiny.en.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin' }
+];
+const engineUrl = 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-bin-x64.zip';
+function installEngine(event) {
+  const root = path.join(app.getPath('userData'), 'models'), dir = path.join(root, 'engine'), zip = path.join(root, 'engine-download.zip');
+  fs.mkdirSync(root, { recursive: true }); try { if (fs.existsSync(zip)) fs.unlinkSync(zip); } catch {}
+  return new Promise((resolve, reject) => {
+    const get = url => https.get(url, r => {
+      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) return get(r.headers.location);
+      if (r.statusCode !== 200) return reject(new Error(`Engine download failed (${r.statusCode}). Official package URL may have changed.`));
+      const total = Number(r.headers['content-length']) || 0; let done = 0; const out = fs.createWriteStream(zip);
+      r.on('data', c => { done += c.length; event.sender.send('models:progress', { id: 'engine', progress: total ? done / total : 0 }); });
+      r.pipe(out); out.on('finish', () => { out.close(); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+        const p = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-Command',`Expand-Archive -LiteralPath '${zip.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`], { windowsHide: true });
+        p.on('close', code => { try { fs.unlinkSync(zip); } catch {} if (code !== 0) return reject(new Error('Could not extract the engine package.')); let found = ''; const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d,e.name); if (e.isDirectory()) walk(f); else if (e.name.toLowerCase() === 'whisper-cli.exe') found = f; } }; walk(dir); found ? resolve({ executable: found, directory: dir }) : reject(new Error('The official package did not contain whisper-cli.exe.')); });
+      }); out.on('error', e => { try { fs.unlinkSync(zip); } catch {} reject(e); });
+    }); get(engineUrl).on('error', e => { try { if (fs.existsSync(zip)) fs.unlinkSync(zip); } catch {} reject(e); });
+  });
+}
+function downloadModel({ id }, event) {
+  const item = modelCatalog.find(x => x.id === id); if (!item) throw new Error('Unknown model.');
+  const dir = path.join(app.getPath('userData'), 'models'); fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, item.file);
+  return new Promise((resolve, reject) => {
+    const request = https.get(item.url, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) return https.get(response.headers.location, r => r.pipe(fs.createWriteStream(target))).on('error', reject);
+      if (response.statusCode !== 200) return reject(new Error(`Model download failed (${response.statusCode}).`));
+      const total = Number(response.headers['content-length']) || 0; let done = 0;
+      const out = fs.createWriteStream(target); response.on('data', chunk => { done += chunk.length; event.sender.send('models:progress', { id, progress: total ? done / total : 0 }); });
+      response.pipe(out); out.on('finish', () => { out.close(); resolve({ ...item, path: target }); }); out.on('error', reject);
+    }); request.on('error', reject);
+  });
 }
 function createWindow() {
   const win = new BrowserWindow({ width: 1280, height: 800, minWidth: 980, minHeight: 620, backgroundColor: '#0d1117', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }});
@@ -59,6 +95,8 @@ app.whenReady().then(() => {
     return scanModelDir(r.filePaths[0]);
   });
   ipcMain.handle('models:scan', (_, dir) => typeof dir === 'string' ? scanModelDir(dir) : { directory: '', executable: '', models: [] });
+  ipcMain.handle('models:download', (event, payload) => downloadModel(payload, event));
+  ipcMain.handle('models:installEngine', event => installEngine(event));
   ipcMain.handle('transcribe:run', (_, { executable, audioPath, model }) => new Promise((resolve, reject) => {
     if (!executable) return reject(new Error('No local Whisper executable is configured. Set its full path in Settings.'));
     if (!audioPath || !fs.existsSync(audioPath)) return reject(new Error('The recording file does not exist.'));

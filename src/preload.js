@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('notesAPI', {
   transcribe: payload => ipcRenderer.invoke('transcribe:run', payload)
   ,chooseModelDirectory: () => ipcRenderer.invoke('models:choose'),
   scanModelDirectory: dir => ipcRenderer.invoke('models:scan', dir)
+  ,downloadModel: payload => ipcRenderer.invoke('models:download', payload)
+  ,installEngine: () => ipcRenderer.invoke('models:installEngine')
+  ,onModelProgress: cb => ipcRenderer.on('models:progress', (_, value) => cb(value))
   ,saveAttachment: payload => ipcRenderer.invoke('attachment:save', payload),
   openAttachment: () => ipcRenderer.invoke('attachment:open'),
   deleteAttachment: file => ipcRenderer.invoke('notes:deleteAttachment', file)

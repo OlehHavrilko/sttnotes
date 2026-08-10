@@ -18,3 +18,6 @@ Notes are persisted locally as JSON. Record uses the renderer's microphone permi
 
 ## Notes workspace
 Folders, Markdown editing/preview, local media attachments, drag-and-drop, drawing capture, note deletion, and keyboard shortcuts are available. Attachments and drawings are copied into the app's local userData attachments directory; no cloud services are used.
+
+## Model Manager and settings
+The Models dialog installs supported Whisper model files into the app's local `models` directory. Downloads are only model installation; transcription is always performed locally. A compatible `whisper-cli.exe` must still be bundled or selected because model weights alone are not an executable engine. Settings persist audio format, language, push-to-talk state/key, and reset controls. Hold the configured key (Space by default) while outside text inputs to record; clicking Record remains available.
