@@ -38,7 +38,7 @@ function createPluginManager(app, ipcMain, dialog) {
       let dir = staging;
       if (!fs.existsSync(path.join(dir, 'manifest.json'))) { const children = fs.readdirSync(dir, { withFileTypes: true }).filter(x => x.isDirectory()); if (children.length === 1) dir = path.join(dir, children[0].name); }
       const manifest = validateManifest(JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')));
-      if (!safePath(staging, manifest.main) || manifest.panel && !safePath(staging, manifest.panel)) throw new Error('Plugin paths must stay inside the plugin directory.');
+      if (!safePath(dir, manifest.main) || manifest.panel && !safePath(dir, manifest.panel)) throw new Error('Plugin paths must stay inside the plugin directory.');
       const target = path.join(root, manifest.id); fs.rmSync(target, { recursive: true, force: true }); fs.renameSync(dir, target);
       const s = state(); s[manifest.id] = { enabled: false, settings: {} }; saveState(s); return manifest;
     } finally { fs.rmSync(staging, { recursive: true, force: true }); }
@@ -51,4 +51,4 @@ function createPluginManager(app, ipcMain, dialog) {
   ipcMain.handle('plugins:getState', () => ({ directory: root, plugins: list(), offline: true }));
   return { list };
 }
-module.exports = { createPluginManager };
+module.exports = { createPluginManager, safePath, validateManifest };
