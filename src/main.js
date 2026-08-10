@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const http = require('http');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 const { createPluginManager } = require('./plugin-manager');
@@ -93,39 +94,77 @@ function scanModelDir(dir) {
   return { directory: dir, executable: executable ? path.join(dir, executable) : '', models };
 }
 const modelCatalog = [
-  { id: 'base-en', name: 'Whisper base (English)', file: 'ggml-base.en.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' },
-  { id: 'tiny-en', name: 'Whisper tiny (English)', file: 'ggml-tiny.en.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin' }
+  { id: 'base-en', name: 'Whisper base (English)', file: 'ggml-base.en.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin', format: 'bin' },
+  { id: 'tiny-en', name: 'Whisper tiny (English)', file: 'ggml-tiny.en.bin', url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin', format: 'bin' }
 ];
-const engineUrl = 'https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.4/whisper-bin-x64.zip';
-function installEngine(event) {
-  const root = path.join(app.getPath('userData'), 'models'), dir = path.join(root, 'engine'), zip = path.join(root, 'engine-download.zip');
-  fs.mkdirSync(root, { recursive: true }); try { if (fs.existsSync(zip)) fs.unlinkSync(zip); } catch {}
+function modelRoot() { return path.join(app.getPath('userData'), 'models'); }
+function sendProgress(event, value) { if (!event.sender.isDestroyed()) event.sender.send('models:progress', value); }
+function requestFollow(url, redirects = 0) {
+  if (redirects > 8) return Promise.reject(new Error('Download redirected too many times.'));
   return new Promise((resolve, reject) => {
-    const get = url => https.get(url, r => {
-      if (r.statusCode >= 300 && r.statusCode < 400 && r.headers.location) return get(r.headers.location);
-      if (r.statusCode !== 200) return reject(new Error(`Engine download failed (${r.statusCode}). Official package URL may have changed.`));
-      const total = Number(r.headers['content-length']) || 0; let done = 0; const out = fs.createWriteStream(zip);
-      r.on('data', c => { done += c.length; event.sender.send('models:progress', { id: 'engine', progress: total ? done / total : 0 }); });
-      r.pipe(out); out.on('finish', () => { out.close(); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
-        const p = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-Command',`Expand-Archive -LiteralPath '${zip.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`], { windowsHide: true });
-        p.on('close', code => { try { fs.unlinkSync(zip); } catch {} if (code !== 0) return reject(new Error('Could not extract the engine package.')); let found = ''; const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const f = path.join(d,e.name); if (e.isDirectory()) walk(f); else if (e.name.toLowerCase() === 'whisper-cli.exe') found = f; } }; walk(dir); found ? resolve({ executable: found, directory: dir }) : reject(new Error('The official package did not contain whisper-cli.exe.')); });
-      }); out.on('error', e => { try { fs.unlinkSync(zip); } catch {} reject(e); });
-    }); get(engineUrl).on('error', e => { try { if (fs.existsSync(zip)) fs.unlinkSync(zip); } catch {} reject(e); });
+    const client = url.startsWith('http://') ? http : https;
+    const request = client.get(url, { headers: { 'User-Agent': 'STTNotes/1.0' } }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.resume();
+        return requestFollow(new URL(response.headers.location, url).toString(), redirects + 1).then(resolve, reject);
+      }
+      resolve(response);
+    });
+    request.setTimeout(30000, () => request.destroy(new Error('Download timed out.')));
+    request.on('error', reject);
   });
 }
-function downloadModel({ id }, event) {
-  const item = modelCatalog.find(x => x.id === id); if (!item) throw new Error('Unknown model.');
-  const dir = path.join(app.getPath('userData'), 'models'); fs.mkdirSync(dir, { recursive: true });
-  const target = path.join(dir, item.file);
-  return new Promise((resolve, reject) => {
-    const request = https.get(item.url, response => {
-      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) return https.get(response.headers.location, r => r.pipe(fs.createWriteStream(target))).on('error', reject);
-      if (response.statusCode !== 200) return reject(new Error(`Model download failed (${response.statusCode}).`));
-      const total = Number(response.headers['content-length']) || 0; let done = 0;
-      const out = fs.createWriteStream(target); response.on('data', chunk => { done += chunk.length; event.sender.send('models:progress', { id, progress: total ? done / total : 0 }); });
-      response.pipe(out); out.on('finish', () => { out.close(); resolve({ ...item, path: target }); }); out.on('error', reject);
-    }); request.on('error', reject);
+async function downloadFile(url, target, event, id) {
+  const response = await requestFollow(url);
+  if (response.statusCode !== 200) { response.resume(); throw new Error(`Download failed (${response.statusCode}) for ${url}`); }
+  const total = Number(response.headers['content-length']) || 0;
+  const temp = `${target}.partial-${process.pid}`;
+  await new Promise((resolve, reject) => {
+    let done = 0; const out = fs.createWriteStream(temp);
+    response.on('data', chunk => { done += chunk.length; sendProgress(event, { id, progress: total ? done / total : 0, bytes: done, total }); });
+    response.on('error', reject); out.on('error', reject);
+    out.on('finish', () => out.close(resolve));
+    response.pipe(out);
   });
+  fs.renameSync(temp, target);
+}
+async function installEngine(event) {
+  const root = modelRoot(), dir = path.join(root, 'engine'), zip = path.join(root, 'engine-download.zip');
+  fs.mkdirSync(root, { recursive: true });
+  let release;
+  try {
+    const response = await requestFollow('https://api.github.com/repos/ggerganov/whisper.cpp/releases/latest');
+    if (response.statusCode !== 200) { response.resume(); throw new Error(`GitHub release lookup failed (${response.statusCode}).`); }
+    release = JSON.parse(await new Promise((resolve, reject) => { let text = ''; response.setEncoding('utf8'); response.on('data', x => text += x); response.on('end', () => resolve(text)); response.on('error', reject); }));
+  } catch (e) { throw new Error(`Could not find the current whisper.cpp Windows release: ${e.message}`); }
+  const asset = (release.assets || []).find(x => /\.zip$/i.test(x.name) && /(x64|amd64)/i.test(x.name) && !/win32|arm64|armv7/i.test(x.name));
+  if (!asset) throw new Error('The latest whisper.cpp release has no Windows x64 ZIP asset. Download a compatible whisper-cli.exe and select its folder instead.');
+  try {
+    fs.rmSync(zip, { force: true }); sendProgress(event, { id: 'engine', progress: 0 });
+    await downloadFile(asset.browser_download_url, zip, event, 'engine');
+    fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+    const p = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-Command', `Expand-Archive -LiteralPath '${zip.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`], { windowsHide: true });
+    const code = await new Promise(resolve => p.on('close', resolve));
+    fs.rmSync(zip, { force: true });
+    if (code !== 0) throw new Error('Windows could not extract the engine ZIP.');
+    const scan = scanModelDir(dir);
+    if (!scan.executable) throw new Error('The downloaded ZIP contains no whisper executable. Select a compatible whisper-cli.exe folder manually.');
+    sendProgress(event, { id: 'engine', progress: 1 });
+    return { executable: scan.executable, directory: dir, source: asset.browser_download_url, version: release.tag_name };
+  } catch (e) { fs.rmSync(zip, { force: true }); throw new Error(`Engine installation failed: ${e.message}`); }
+}
+async function downloadModel({ id }, event) {
+  const item = modelCatalog.find(x => x.id === id); if (!item) throw new Error('Unknown model ID.');
+  const dir = modelRoot(); fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, item.file);
+  try {
+    await downloadFile(item.url, target, event, id);
+    return { ...item, path: target, directory: dir, size: fs.statSync(target).size };
+  } catch (e) { fs.rmSync(`${target}.partial-${process.pid}`, { force: true }); throw new Error(`Model installation failed: ${e.message}`); }
+}
+function modelState() {
+  const dir = modelRoot(), scan = scanModelDir(dir);
+  return { directory: dir, executable: scan.executable || '', models: scan.models, catalog: modelCatalog.map(({ id, name, file, format }) => ({ id, name, file, format })) };
 }
 function createWindow() {
   const win = new BrowserWindow({ width: 1280, height: 800, minWidth: 980, minHeight: 620, backgroundColor: '#0d1117', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }});
@@ -200,6 +239,7 @@ app.whenReady().then(async () => {
     return scanModelDir(r.filePaths[0]);
   });
   ipcMain.handle('models:scan', (_, dir) => typeof dir === 'string' ? scanModelDir(dir) : { directory: '', executable: '', models: [] });
+  ipcMain.handle('models:state', () => modelState());
   ipcMain.handle('models:download', (event, payload) => downloadModel(payload, event));
   ipcMain.handle('models:installEngine', event => installEngine(event));
   ipcMain.handle('transcribe:run', (_, { executable, audioPath, model }) => new Promise((resolve, reject) => {

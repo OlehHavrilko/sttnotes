@@ -9,7 +9,8 @@ contextBridge.exposeInMainWorld('notesAPI', {
   saveAudio: payload => ipcRenderer.invoke('audio:save', payload),
   transcribe: payload => ipcRenderer.invoke('transcribe:run', payload)
   ,chooseModelDirectory: () => ipcRenderer.invoke('models:choose'),
-  scanModelDirectory: dir => ipcRenderer.invoke('models:scan', dir)
+  scanModelDirectory: dir => ipcRenderer.invoke('models:scan', dir),
+  modelState: () => ipcRenderer.invoke('models:state')
   ,downloadModel: payload => ipcRenderer.invoke('models:download', payload)
   ,installEngine: () => ipcRenderer.invoke('models:installEngine')
   ,onModelProgress: cb => ipcRenderer.on('models:progress', (_, value) => cb(value))
