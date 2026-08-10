@@ -1,6 +1,6 @@
 # Plugin API
 
-Plugins are local packages in `%APPDATA%\Nemotron Notes\plugins`. Each package has a
+Plugins are local packages in `%APPDATA%\STTNotes\plugins`. Each package has a
 `manifest.json` with `id` (lowercase validated), `name`, `version`, optional `main`,
 `panel`, and `capabilities`. Supported capabilities are `notes.read`,
 `notes.write`, `ui.panel`, `commands`, `network`, `oauth`, `webhooks`, and `calendar`.

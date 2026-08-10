@@ -1,4 +1,4 @@
-# Nemotron Notes
+# STTNotes
 
 Offline-first Windows desktop MVP built with Electron and vanilla JavaScript (no cloud APIs).
 

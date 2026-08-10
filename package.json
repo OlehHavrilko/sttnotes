@@ -1,5 +1,5 @@
 {
-  "name": "nemotron-notes",
+  "name": "sttnotes",
   "version": "1.0.0",
   "description": "Offline-first notes and local transcription desktop app",
   "main": "src/main.js",
@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "com.nemotron.notes",
-    "productName": "Nemotron Notes",
+    "productName": "STTNotes",
     "files": ["src/**/*", "README.md", "package.json"],
     "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
     "nsis": {

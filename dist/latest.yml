@@ -1,8 +1,8 @@
 version: 1.0.0
 files:
-  - url: Nemotron-Notes-Setup-1.0.0.exe
-    sha512: t6JtV24AYxkmabIBfK0UuBWlZA6ttEf6gDeTT5uHwuANDc/VxT9x3WxBo32nazlUIWx7ypyKyND/OSXv9BHasw==
-    size: 78347291
-path: Nemotron-Notes-Setup-1.0.0.exe
-sha512: t6JtV24AYxkmabIBfK0UuBWlZA6ttEf6gDeTT5uHwuANDc/VxT9x3WxBo32nazlUIWx7ypyKyND/OSXv9BHasw==
-releaseDate: '2026-08-10T01:32:26.177Z'
+  - url: STTNotes-Setup-1.0.0.exe
+    sha512: 8oPhM7cLSfQnrEpYVYB6x1yZwYnAsP7UfEuP7RY2TrJxiPIFHEins5pD7FU4dFi8KKxLmxGz2YduWS6yWOdRhQ==
+    size: 78347114
+path: STTNotes-Setup-1.0.0.exe
+sha512: 8oPhM7cLSfQnrEpYVYB6x1yZwYnAsP7UfEuP7RY2TrJxiPIFHEins5pD7FU4dFi8KKxLmxGz2YduWS6yWOdRhQ==
+releaseDate: '2026-08-10T01:33:43.449Z'
