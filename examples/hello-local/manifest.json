@@ -1,0 +1,1 @@
+{"id":"hello-local","name":"Hello Local","version":"1.0.0","description":"Offline example panel","capabilities":["ui.panel"],"main":"index.js","panel":"panel.html"}

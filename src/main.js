@@ -3,6 +3,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const { createPluginManager } = require('./plugin-manager');
 const store = () => path.join(app.getPath('userData'), 'notes.json');
 const attachmentDir = () => path.join(app.getPath('userData'), 'attachments');
 function readNotes() { try { const value = JSON.parse(fs.readFileSync(store(), 'utf8')); return Array.isArray(value) ? value : []; } catch { return []; } }
@@ -63,6 +64,7 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 app.whenReady().then(() => {
+  createPluginManager(app, ipcMain, dialog);
   ipcMain.handle('notes:list', () => readNotes());
   ipcMain.handle('notes:save', (_, notes) => { writeNotes(notes); return true; });
   ipcMain.handle('notes:deleteAttachment', (_, file) => { if (isAttachmentPath(file) && fs.existsSync(file)) fs.unlinkSync(file); return true; });

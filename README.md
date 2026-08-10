@@ -21,3 +21,6 @@ Folders, Markdown editing/preview, local media attachments, drag-and-drop, drawi
 
 ## Model Manager and settings
 The Models dialog installs supported Whisper model files into the app's local `models` directory. Downloads are only model installation; transcription is always performed locally. A compatible `whisper-cli.exe` must still be bundled or selected because model weights alone are not an executable engine. Settings persist audio format, language, push-to-talk state/key, and reset controls. Hold the configured key (Space by default) while outside text inputs to record; clicking Record remains available.
+
+## Plugins and integrations
+The **Plugins** manager installs local folders or ZIP files under the per-user `plugins` directory, validates manifests and paths, and supports enable/disable/remove. The core remains fully offline by default; plugins are disabled on install and renderer Node access is never exposed. Capability declarations are explicit and restricted. Optional GitHub, Google Drive, calendar, Telegram, and Discord adapters are intentionally stubs: they remain offline/disabled until you configure your own OAuth client, token, or webhook URL. See `docs/PLUGIN_API.md` and `examples/hello-local`.

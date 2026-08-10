@@ -15,4 +15,12 @@ contextBridge.exposeInMainWorld('notesAPI', {
   openAttachment: () => ipcRenderer.invoke('attachment:open'),
   deleteAttachment: file => ipcRenderer.invoke('notes:deleteAttachment', file)
   ,copyAttachment: file => ipcRenderer.invoke('attachment:copy', file)
+  ,plugins: {
+    list: () => ipcRenderer.invoke('plugins:list'),
+    installZip: () => ipcRenderer.invoke('plugins:chooseInstall'),
+    installFolder: () => ipcRenderer.invoke('plugins:chooseFolderInstall'),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('plugins:setEnabled', id, !!enabled),
+    remove: id => ipcRenderer.invoke('plugins:remove', id),
+    state: () => ipcRenderer.invoke('plugins:getState')
+  }
 });
