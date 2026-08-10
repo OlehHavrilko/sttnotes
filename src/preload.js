@@ -1,4 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const crypto = require('crypto');
+const invoke = (channel, payload) => {
+  const requestId = crypto.randomUUID();
+  return ipcRenderer.invoke(channel, payload && typeof payload === 'object' ? { ...payload, operationId: payload.operationId || requestId } : payload)
+    .catch(error => { error.requestId = requestId; throw error; });
+};
 contextBridge.exposeInMainWorld('notesAPI', {
   list: () => ipcRenderer.invoke('notes:list'),
   save: notes => ipcRenderer.invoke('notes:save', notes),
@@ -7,12 +13,13 @@ contextBridge.exposeInMainWorld('notesAPI', {
   openFile: () => ipcRenderer.invoke('file:open'),
   readText: file => ipcRenderer.invoke('file:readText', file),
   saveAudio: payload => ipcRenderer.invoke('audio:save', payload),
-  transcribe: payload => ipcRenderer.invoke('transcribe:run', payload)
+  transcribe: payload => invoke('transcribe:run', payload),
+  cancel: id => ipcRenderer.invoke('operations:cancel', id)
   ,chooseModelDirectory: () => ipcRenderer.invoke('models:choose'),
   scanModelDirectory: dir => ipcRenderer.invoke('models:scan', dir),
   modelState: () => ipcRenderer.invoke('models:state')
-  ,downloadModel: payload => ipcRenderer.invoke('models:download', payload)
-  ,installEngine: () => ipcRenderer.invoke('models:installEngine')
+  ,downloadModel: payload => invoke('models:download', payload)
+  ,installEngine: payload => invoke('models:installEngine', payload)
   ,onModelProgress: cb => ipcRenderer.on('models:progress', (_, value) => cb(value))
   ,saveAttachment: payload => ipcRenderer.invoke('attachment:save', payload),
   openAttachment: () => ipcRenderer.invoke('attachment:open'),

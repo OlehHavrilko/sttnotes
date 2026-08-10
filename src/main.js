@@ -7,12 +7,25 @@ const http = require('http');
 const crypto = require('crypto');
 const initSqlJs = require('sql.js');
 const { createPluginManager } = require('./plugin-manager');
+const { createLogger } = require('./logger');
 const store = () => path.join(app.getPath('userData'), 'notes.sqlite');
 const legacyStore = () => path.join(app.getPath('userData'), 'notes.json');
 const attachmentDir = () => path.join(app.getPath('userData'), 'attachments');
 const backupDir = () => path.join(app.getPath('userData'), 'backups');
 const schemaVersion = 2;
 let db;
+let logger;
+const cancelledOperations = new Set();
+const activeTranscriptions = new Map();
+function operationId(payload) {
+  return typeof payload?.operationId === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(payload.operationId) ? payload.operationId : crypto.randomUUID();
+}
+function atomicWrite(file, data) {
+  const temporary = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(temporary, data);
+  fs.rmSync(file, { force: true });
+  fs.renameSync(temporary, file);
+}
 function backupDatabase() {
   if (!db) return null;
   fs.mkdirSync(backupDir(), { recursive: true });
@@ -22,7 +35,7 @@ function backupDatabase() {
   files.slice(20).forEach(x => fs.rmSync(path.join(backupDir(), x), { force: true }));
   return file;
 }
-function persistDb() { fs.mkdirSync(path.dirname(store()), { recursive: true }); fs.writeFileSync(store(), Buffer.from(db.export())); }
+function persistDb() { fs.mkdirSync(path.dirname(store()), { recursive: true }); atomicWrite(store(), Buffer.from(db.export())); }
 function tableColumns(table) { return rows(`PRAGMA table_info(${table})`).map(x => x.name); }
 function migrateDb() {
   db.run('CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -71,7 +84,13 @@ function upsertNote(raw, history = true) {
   db.run('INSERT OR REPLACE INTO notes VALUES(?,?,?,?,?,?)', [n.id,n.title,n.body,n.folder,n.updated,JSON.stringify(n.attachments)]);
   db.run('INSERT OR IGNORE INTO folders VALUES (?)', [n.folder]);
 }
-function readNotes() { return rows('SELECT id,title,body,folder,updated,attachments FROM notes ORDER BY updated DESC').map(n => ({ ...n, attachments: JSON.parse(n.attachments || '[]') })); }
+function parseAttachments(value) {
+  try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed.filter(isAttachmentPath).slice(0, 1000) : []; } catch (error) {
+    logger?.warn('Malformed attachment metadata ignored', { error: error.message });
+    return [];
+  }
+}
+function readNotes() { return rows('SELECT id,title,body,folder,updated,attachments FROM notes ORDER BY updated DESC').map(n => ({ ...n, attachments: parseAttachments(n.attachments) })); }
 function writeNotes(payload) {
   const notes = Array.isArray(payload) ? payload : payload?.notes;
   if (!Array.isArray(notes) || notes.length > 10000) throw new Error('Invalid notes data.');
@@ -114,21 +133,25 @@ function requestFollow(url, redirects = 0) {
     request.on('error', reject);
   });
 }
-async function downloadFile(url, target, event, id) {
+async function downloadFile(url, target, event, id, operation) {
   const response = await requestFollow(url);
   if (response.statusCode !== 200) { response.resume(); throw new Error(`Download failed (${response.statusCode}) for ${url}`); }
   const total = Number(response.headers['content-length']) || 0;
   const temp = `${target}.partial-${process.pid}`;
   await new Promise((resolve, reject) => {
     let done = 0; const out = fs.createWriteStream(temp);
-    response.on('data', chunk => { done += chunk.length; sendProgress(event, { id, progress: total ? done / total : 0, bytes: done, total }); });
+    response.on('data', chunk => {
+      if (cancelledOperations.has(operation)) { response.destroy(); reject(new Error('Operation cancelled.')); return; }
+      done += chunk.length; sendProgress(event, { id, progress: total ? done / total : 0, bytes: done, total });
+    });
     response.on('error', reject); out.on('error', reject);
     out.on('finish', () => out.close(resolve));
     response.pipe(out);
   });
   fs.renameSync(temp, target);
 }
-async function installEngine(event) {
+async function installEngine(event, payload = {}) {
+  const operation = operationId(payload);
   const root = modelRoot(), dir = path.join(root, 'engine'), zip = path.join(root, 'engine-download.zip');
   fs.mkdirSync(root, { recursive: true });
   let release;
@@ -141,7 +164,7 @@ async function installEngine(event) {
   if (!asset) throw new Error('The latest whisper.cpp release has no Windows x64 ZIP asset. Download a compatible whisper-cli.exe and select its folder instead.');
   try {
     fs.rmSync(zip, { force: true }); sendProgress(event, { id: 'engine', progress: 0 });
-    await downloadFile(asset.browser_download_url, zip, event, 'engine');
+    await downloadFile(asset.browser_download_url, zip, event, 'engine', operation);
     fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
     const p = spawn('powershell.exe', ['-NoProfile','-NonInteractive','-Command', `Expand-Archive -LiteralPath '${zip.replace(/'/g, "''")}' -DestinationPath '${dir.replace(/'/g, "''")}' -Force`], { windowsHide: true });
     const code = await new Promise(resolve => p.on('close', resolve));
@@ -153,12 +176,13 @@ async function installEngine(event) {
     return { executable: scan.executable, directory: dir, source: asset.browser_download_url, version: release.tag_name };
   } catch (e) { fs.rmSync(zip, { force: true }); throw new Error(`Engine installation failed: ${e.message}`); }
 }
-async function downloadModel({ id }, event) {
+async function downloadModel({ id, operationId: requestedOperation }, event) {
+  const operation = operationId({ operationId: requestedOperation });
   const item = modelCatalog.find(x => x.id === id); if (!item) throw new Error('Unknown model ID.');
   const dir = modelRoot(); fs.mkdirSync(dir, { recursive: true });
   const target = path.join(dir, item.file);
   try {
-    await downloadFile(item.url, target, event, id);
+    await downloadFile(item.url, target, event, id, operation);
     return { ...item, path: target, directory: dir, size: fs.statSync(target).size };
   } catch (e) { fs.rmSync(`${target}.partial-${process.pid}`, { force: true }); throw new Error(`Model installation failed: ${e.message}`); }
 }
@@ -171,7 +195,9 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'index.html'));
 }
 app.whenReady().then(async () => {
-  await initDb();
+logger = createLogger(app);
+logger.info('Application starting', { version: app.getVersion() });
+await initDb();
   setInterval(() => { try { backupDatabase(); } catch {} }, 24 * 60 * 60 * 1000);
   createPluginManager(app, ipcMain, dialog);
   ipcMain.handle('notes:list', () => ({ notes: readNotes(), folders: rows('SELECT name FROM folders ORDER BY name').map(x => x.name) }));
@@ -240,18 +266,21 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('models:scan', (_, dir) => typeof dir === 'string' ? scanModelDir(dir) : { directory: '', executable: '', models: [] });
   ipcMain.handle('models:state', () => modelState());
-  ipcMain.handle('models:download', (event, payload) => downloadModel(payload, event));
-  ipcMain.handle('models:installEngine', event => installEngine(event));
-  ipcMain.handle('transcribe:run', (_, { executable, audioPath, model }) => new Promise((resolve, reject) => {
+  ipcMain.handle('operations:cancel', (_, id) => { if (typeof id === 'string') cancelledOperations.add(id); activeTranscriptions.get(id)?.kill(); return true; });
+  ipcMain.handle('models:download', (event, payload) => downloadModel(payload, event).finally(() => cancelledOperations.delete(payload?.operationId)));
+  ipcMain.handle('models:installEngine', (event, payload) => installEngine(event, payload).finally(() => cancelledOperations.delete(payload?.operationId)));
+  ipcMain.handle('transcribe:run', (_, { executable, audioPath, model, operationId: requestedOperation }) => new Promise((resolve, reject) => {
+    const operation = operationId({ operationId: requestedOperation });
     if (!executable) return reject(new Error('No local Whisper executable is configured. Set its full path in Settings.'));
     if (!audioPath || !fs.existsSync(audioPath)) return reject(new Error('The recording file does not exist.'));
     if (!fs.existsSync(executable) || !fs.statSync(executable).isFile()) return reject(new Error(`Configured Whisper executable was not found: ${executable}`));
     if (model && (!fs.existsSync(model) || !fs.statSync(model).isFile())) return reject(new Error('Configured Whisper model was not found.'));
     const child = spawn(executable, ['-m', model || 'base', '-f', audioPath, '-otxt'], { windowsHide: true });
+    activeTranscriptions.set(operation, child);
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; }); child.stderr.on('data', d => { err += d; });
     child.on('error', e => reject(new Error(`Could not start local Whisper: ${e.message}`)));
-    child.on('close', code => code === 0 ? resolve(out.trim()) : reject(new Error(`Local Whisper exited with code ${code}: ${err.trim() || 'no error details'}`)));
+    child.on('close', code => { activeTranscriptions.delete(operation); code === 0 ? resolve(out.trim()) : reject(new Error(`Local Whisper exited with code ${code}: ${err.trim() || 'no error details'}`)); });
   }));
   ipcMain.handle('ai:status', () => ({ enabled: false, network: false, providers: [{ id: 'ollama', label: 'Ollama (localhost)', configured: false }, { id: 'lmstudio', label: 'LM Studio (localhost)', configured: false }, { id: 'openai-compatible', label: 'OpenAI-compatible local endpoint', configured: false }] }));
   ipcMain.handle('ai:run', async (_, payload) => {
