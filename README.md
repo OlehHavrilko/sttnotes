@@ -6,7 +6,7 @@ Offline-first Windows desktop MVP built with Electron and vanilla JavaScript (no
 1. Install Node.js 18+.
 2. `npm install`
 3. `npm start`
-4. `npm run build` creates an unpacked Windows build in `dist/`.
+4. `npm run build` creates versioned NSIS and portable Windows artifacts in `dist/`.
 
 ## Offline model setup
 Use **Install / Select model directory** in the Model Manager and choose a local folder containing a Whisper executable (`whisper-cli.exe` or similar) and model files (`.bin`, `.gguf`, `.pt`, `.onnx`, or `.safetensors`). The app scans and remembers that directory and uses the discovered local executable for transcription. There are no cloud downloads or fallback network calls. A fully offline first run requires models bundled into the installer or imported from a local directory; models are not silently fetched.
@@ -24,3 +24,10 @@ The Models dialog installs supported Whisper model files into the app's local `m
 
 ## Plugins and integrations
 The **Plugins** manager installs local folders or ZIP files under the per-user `plugins` directory, validates manifests and paths, and supports enable/disable/remove. The core remains fully offline by default; plugins are disabled on install and renderer Node access is never exposed. Capability declarations are explicit and restricted. Optional GitHub, Google Drive, calendar, Telegram, and Discord adapters are intentionally stubs: they remain offline/disabled until you configure your own OAuth client, token, or webhook URL. See `docs/PLUGIN_API.md` and `examples/hello-local`.
+
+## Backups, encrypted transfer, and local AI
+The Backup dialog creates rotating local SQLite snapshots (the last 20 are retained), lists them for restore, and can export/import an encrypted `.sttnx` workspace. AES-256-GCM is used with a passphrase; losing the passphrase makes the export unrecoverable. Restore restarts the app after validating the selected snapshot.
+
+Local AI is an explicit, disabled-by-default provider boundary. Ollama, LM Studio, and OpenAI-compatible **localhost** endpoints are reserved for a future configured provider; STTNotes never falls back to a cloud endpoint. OCR and post-processing similarly expose no fake result: media previews work locally, while OCR/transcription require a configured local executable.
+
+The portable build keeps Electron's user data beside the executable according to Electron Builder's portable runtime behavior. Installer metadata and artifacts are versioned from `package.json`; update by installing the newer version or replacing the portable directory after checking the release notes.

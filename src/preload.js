@@ -17,6 +17,17 @@ contextBridge.exposeInMainWorld('notesAPI', {
   openAttachment: () => ipcRenderer.invoke('attachment:open'),
   deleteAttachment: file => ipcRenderer.invoke('notes:deleteAttachment', file)
   ,copyAttachment: file => ipcRenderer.invoke('attachment:copy', file)
+  ,backups: {
+    list: () => ipcRenderer.invoke('backups:list'),
+    create: () => ipcRenderer.invoke('backups:create'),
+    restore: file => ipcRenderer.invoke('backups:restore', file)
+  },
+  exportWorkspace: passphrase => ipcRenderer.invoke('workspace:export', passphrase),
+  importWorkspace: passphrase => ipcRenderer.invoke('workspace:import', passphrase),
+  ai: {
+    status: () => ipcRenderer.invoke('ai:status'),
+    run: payload => ipcRenderer.invoke('ai:run', payload)
+  }
   ,plugins: {
     list: () => ipcRenderer.invoke('plugins:list'),
     installZip: () => ipcRenderer.invoke('plugins:chooseInstall'),
