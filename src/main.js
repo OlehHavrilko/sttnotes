@@ -3,14 +3,49 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
+const initSqlJs = require('sql.js');
 const { createPluginManager } = require('./plugin-manager');
-const store = () => path.join(app.getPath('userData'), 'notes.json');
+const store = () => path.join(app.getPath('userData'), 'notes.sqlite');
+const legacyStore = () => path.join(app.getPath('userData'), 'notes.json');
 const attachmentDir = () => path.join(app.getPath('userData'), 'attachments');
-function readNotes() { try { const value = JSON.parse(fs.readFileSync(store(), 'utf8')); return Array.isArray(value) ? value : []; } catch { return []; } }
-function writeNotes(notes) {
+let db;
+function persistDb() { fs.writeFileSync(store(), Buffer.from(db.export())); }
+function initDb() {
+  const SQL = initSqlJs({ locateFile: file => path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file) });
+  return SQL.then(Sql => {
+    fs.mkdirSync(path.dirname(store()), { recursive: true });
+    if (fs.existsSync(store())) db = new Sql.Database(fs.readFileSync(store()));
+    else {
+      db = new Sql.Database();
+      db.run('CREATE TABLE notes (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, folder TEXT NOT NULL, updated INTEGER NOT NULL, attachments TEXT NOT NULL)');
+      db.run('CREATE TABLE folders (name TEXT PRIMARY KEY)');
+      db.run('CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, folder TEXT NOT NULL, updated INTEGER NOT NULL, attachments TEXT NOT NULL, created INTEGER NOT NULL)');
+      db.run('INSERT OR IGNORE INTO folders VALUES (?)', ['Inbox']);
+      if (fs.existsSync(legacyStore())) {
+        try {
+          const legacy = JSON.parse(fs.readFileSync(legacyStore(), 'utf8'));
+          if (Array.isArray(legacy)) legacy.forEach(n => upsertNote(n, false));
+          fs.copyFileSync(legacyStore(), `${legacyStore()}.backup-${Date.now()}`);
+        } catch {}
+      }
+      persistDb();
+    }
+  });
+}
+function rows(sql, params = []) { const s = db.prepare(sql); s.bind(params); const out = []; while (s.step()) out.push(s.getAsObject()); s.free(); return out; }
+function cleanNote(n) { return { id: String(n.id || Date.now()), title: String(n.title || '').slice(0, 1000), body: String(n.body || '').slice(0, 1000000), folder: String(n.folder || 'Inbox').slice(0, 200), updated: Number(n.updated) || Date.now(), attachments: Array.isArray(n.attachments) ? n.attachments.filter(isAttachmentPath).slice(0, 1000) : [] }; }
+function upsertNote(raw, history = true) {
+  const n = cleanNote(raw);
+  if (history && rows('SELECT id FROM notes WHERE id=?', [n.id]).length) db.run('INSERT INTO history(note_id,title,body,folder,updated,attachments,created) VALUES(?,?,?,?,?,?,?)', [n.id,n.title,n.body,n.folder,n.updated,JSON.stringify(n.attachments),Date.now()]);
+  db.run('INSERT OR REPLACE INTO notes VALUES(?,?,?,?,?,?)', [n.id,n.title,n.body,n.folder,n.updated,JSON.stringify(n.attachments)]);
+  db.run('INSERT OR IGNORE INTO folders VALUES (?)', [n.folder]);
+}
+function readNotes() { return rows('SELECT id,title,body,folder,updated,attachments FROM notes ORDER BY updated DESC').map(n => ({ ...n, attachments: JSON.parse(n.attachments || '[]') })); }
+function writeNotes(payload) {
+  const notes = Array.isArray(payload) ? payload : payload?.notes;
   if (!Array.isArray(notes) || notes.length > 10000) throw new Error('Invalid notes data.');
-  const clean = notes.map(n => ({ id: String(n.id || Date.now()), title: String(n.title || '').slice(0, 1000), body: String(n.body || '').slice(0, 1000000), folder: String(n.folder || 'Inbox').slice(0, 200), updated: Number(n.updated) || Date.now(), attachments: Array.isArray(n.attachments) ? n.attachments.filter(isAttachmentPath).slice(0, 1000) : [] }));
-  fs.mkdirSync(path.dirname(store()), { recursive: true }); fs.writeFileSync(store(), JSON.stringify(clean, null, 2), 'utf8');
+  const folders = Array.isArray(payload?.folders) ? payload.folders : [];
+  db.run('BEGIN'); try { notes.forEach(n => upsertNote(n)); folders.forEach(f => db.run('INSERT OR IGNORE INTO folders VALUES (?)', [String(f).slice(0,200)])); db.run('COMMIT'); persistDb(); } catch (e) { db.run('ROLLBACK'); throw e; }
 }
 function isAttachmentPath(file) {
   if (typeof file !== 'string') return false;
@@ -63,10 +98,13 @@ function createWindow() {
   const win = new BrowserWindow({ width: 1280, height: 800, minWidth: 980, minHeight: 620, backgroundColor: '#0d1117', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }});
   win.loadFile(path.join(__dirname, 'index.html'));
 }
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await initDb();
   createPluginManager(app, ipcMain, dialog);
-  ipcMain.handle('notes:list', () => readNotes());
+  ipcMain.handle('notes:list', () => ({ notes: readNotes(), folders: rows('SELECT name FROM folders ORDER BY name').map(x => x.name) }));
   ipcMain.handle('notes:save', (_, notes) => { writeNotes(notes); return true; });
+  ipcMain.handle('notes:history', (_, id) => rows('SELECT id,title,body,folder,updated,attachments,created FROM history WHERE note_id=? ORDER BY created DESC LIMIT 50', [String(id)]).map(n => ({ ...n, attachments: JSON.parse(n.attachments || '[]') })));
+  ipcMain.handle('notes:restore', (_, version) => { upsertNote(version); persistDb(); return readNotes(); });
   ipcMain.handle('notes:deleteAttachment', (_, file) => { if (isAttachmentPath(file) && fs.existsSync(file)) fs.unlinkSync(file); return true; });
   ipcMain.handle('attachment:save', (_, { data, name }) => {
     if (typeof data !== 'string' || data.length > 50 * 1024 * 1024) throw new Error('Invalid attachment data.');

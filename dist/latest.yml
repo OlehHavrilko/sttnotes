@@ -1,8 +1,8 @@
 version: 1.0.0
 files:
   - url: STTNotes-Setup-1.0.0.exe
-    sha512: 8oPhM7cLSfQnrEpYVYB6x1yZwYnAsP7UfEuP7RY2TrJxiPIFHEins5pD7FU4dFi8KKxLmxGz2YduWS6yWOdRhQ==
-    size: 78347114
+    sha512: 44UjXs4MjZ0HjKxYtJG5+zOVEUq0ymOLjlk9E551kOCmG9nQWHV/j6eiwMc8r/yGb6TU7mZnK31mB55Rr3wv0g==
+    size: 84871238
 path: STTNotes-Setup-1.0.0.exe
-sha512: 8oPhM7cLSfQnrEpYVYB6x1yZwYnAsP7UfEuP7RY2TrJxiPIFHEins5pD7FU4dFi8KKxLmxGz2YduWS6yWOdRhQ==
-releaseDate: '2026-08-10T01:33:43.449Z'
+sha512: 44UjXs4MjZ0HjKxYtJG5+zOVEUq0ymOLjlk9E551kOCmG9nQWHV/j6eiwMc8r/yGb6TU7mZnK31mB55Rr3wv0g==
+releaseDate: '2026-08-10T01:38:25.127Z'

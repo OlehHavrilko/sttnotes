@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('notesAPI', {
   list: () => ipcRenderer.invoke('notes:list'),
   save: notes => ipcRenderer.invoke('notes:save', notes),
+  history: id => ipcRenderer.invoke('notes:history', id),
+  restore: version => ipcRenderer.invoke('notes:restore', version),
   openFile: () => ipcRenderer.invoke('file:open'),
   readText: file => ipcRenderer.invoke('file:readText', file),
   saveAudio: payload => ipcRenderer.invoke('audio:save', payload),
