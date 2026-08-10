@@ -1,0 +1,27 @@
+{
+  "name": "nemotron-notes",
+  "version": "1.0.0",
+  "description": "Offline-first notes and local transcription desktop app",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.nemotron.notes",
+    "productName": "Nemotron Notes",
+    "files": ["src/**/*", "README.md", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}
